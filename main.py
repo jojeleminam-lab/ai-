@@ -3,4 +3,8 @@ st.title('배어나오는 혼탁한 문장, 불손한 광기의 그릇 솟아오
 a=st.text_input('이름을 입력해주세요!')
 b=st.selectbox('좋아하는 음식을 선택해주세요!',['콩나물국밥','인도카레','김치찌개'])
 if st.button('인사말 생성'):
-  st.write('반갑습니다!')
+  st.write('환영한다')
+  st.info(a+'레미님 환영합니다')
+  st.warning(b+를 좋아하나보네요 저도 좋아합니다')
+  st.error('잘 지내봅시다')
+  st.balloons()
