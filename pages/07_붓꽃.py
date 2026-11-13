@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -82,3 +81,4 @@ ax.grid(True, linestyle='--', alpha=0.5)
 
 # 스트림릿에 그래프 출력
 st.pyplot(fig)
+
