@@ -1,120 +1,183 @@
 from pathlib import Path
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
-# 페이지 기본 설정
+# 1. 페이지 기본 설정
 st.set_page_config(
-    page_title="Iris 데이터 시각화 대시보드", page_icon="🌸", layout="wide"
+    page_title="인천광역시 폐기물 재활용률 현황",
+    page_icon="♻️",
+    layout="wide",
+)
+
+st.title("♻️ 인천광역시 군·구별 폐기물 발생 및 재활용 현황 (2023)")
+st.markdown(
+    "인천광역시 10개 군·구의 폐기물 유형별 발생량, 재활용량 및 재활용률을 비교할 수 있는 대시보드입니다."
 )
 
 
-# 데이터 로드 함수 (캐싱 적용)
+# 2. 데이터 로드 (pages 폴더의 상위 폴더에서 CSV 탐색)
 @st.cache_data
 def load_data():
-    # 현재 파일(pages/iris_dashboard.py)의 상위 폴더(루트)에 있는 Iris.csv 경로 지정
-    current_dir = Path(__file__).resolve().parent
-    csv_path = current_dir.parent / "Iris.csv"
+    # 현재 파일(pages/xxx.py)의 부모(pages)의 부모(루트 폴더) 경로 계산
+    root_dir = Path(__file__).resolve().parent.parent
+    file_path = root_dir / "인천광역시_폐기물 재활용률_20231231.csv"
 
-    # 한글 인코딩(cp949 / utf-8) 자동 대응
-    try:
-        df = pd.read_csv(csv_path, encoding="cp949")
-    except UnicodeDecodeError:
-        df = pd.read_csv(csv_path, encoding="utf-8")
+    # 공공데이터 인코딩(cp949 또는 utf-8) 자동 대응
+    for enc in ["cp949", "utf-8", "euc-kr"]:
+        try:
+            df = pd.read_csv(file_path, encoding=enc)
+            break
+        except UnicodeDecodeError:
+            continue
 
-    # 컬럼명 앞뒤 공백 제거 (예: '꽃받침 길이 ' -> '꽃받침 길이')
+    # 컬럼 공백 제거 및 재활용률(%) 계산 컬럼 추가
     df.columns = df.columns.str.strip()
-    return df
+
+    categories = {
+        "생활계": ("생활계 폐기물 발생량(톤_년)", "생활계 폐기물 재활용량(톤_년)"),
+        "사업장 배출시설계": (
+            "사업장 배출시설계 폐기물 발생량(톤_년)",
+            "사업장 배출시설계 폐기물_재활용(톤_년)",
+        ),
+        "건설": ("건설 폐기물 발생량(톤_년)", "건설 폐기물 재활용(톤_년)"),
+        "지정": ("지정 폐기물 발생량(톤_년)", "지정 폐기물 재활용(톤_년)"),
+    }
+
+    # 총합 계산
+    gen_cols = [v[0] for v in categories.values()]
+    rec_cols = [v[1] for v in categories.values()]
+
+    df["총 발생량(톤_년)"] = df[gen_cols].sum(axis=1)
+    df["총 재활용량(톤_년)"] = df[rec_cols].sum(axis=1)
+    df["전체 재활용률(%)"] = (df["총 재활용량(톤_년)"] / df["총 발생량(톤_년)"] * 100).round(2)
+
+    # 유형별 재활용률(%) 계산
+    for name, (gen_col, rec_col) in categories.items():
+        df[f"{name} 재활용률(%)"] = (df[rec_col] / df[gen_col] * 100).round(2)
+
+    return df, categories
 
 
-df = load_data()
-
-# 타이틀 및 설명
-st.title("🌸 Iris(붓꽃) 품종별 데이터 분석 대시보드")
-st.markdown(
-    "사이드바에서 품종과 축을 선택해 **인터랙티브 그래프**를 탐색해보세요."
-)
-
-# --- 사이드바 필터 ---
-st.sidebar.header("🔍 그래프 설정")
-
-# 품종 필터링
-species_list = df["품종"].unique().tolist()
-selected_species = st.sidebar.multiselect(
-    "표시할 품종 선택", options=species_list, default=species_list
-)
-
-# 수치형 컬럼 목록
-numeric_cols = [col for col in df.columns if col != "품종"]
-
-x_axis = st.sidebar.selectbox("X축 변수 선택", options=numeric_cols, index=2)
-y_axis = st.sidebar.selectbox("Y축 변수 선택", options=numeric_cols, index=3)
-
-# 필터링된 데이터프레임
-filtered_df = df[df["품종"].isin(selected_species)]
-
-if filtered_df.empty:
-    st.warning("최소 한 개 이상의 품종을 선택해주세요.")
+try:
+    df, categories = load_data()
+except FileNotFoundError:
+    st.error("상위 폴더에서 '인천광역시_폐기물 재활용률_20231231.csv' 파일을 찾을 수 없습니다.")
     st.stop()
 
-# 상단 요약 지표 (KPI)
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("선택된 데이터 수", f"{len(filtered_df)} 개")
-col2.metric(f"평균 {x_axis}", f"{filtered_df[x_axis].mean():.2f} cm")
-col3.metric(f"평균 {y_axis}", f"{filtered_df[y_axis].mean():.2f} cm")
-col4.metric("선택된 품종 수", f"{len(selected_species)} 종")
+# 3. 사이드바 필터
+st.sidebar.header("🔍 조회 옵션")
+selected_regions = st.sidebar.multiselect(
+    "군·구 선택",
+    options=df["군구별"].tolist(),
+    default=df["군구별"].tolist(),
+)
+
+waste_type = st.sidebar.selectbox(
+    "폐기물 유형 선택",
+    options=["전체 합계"] + list(categories.keys()),
+)
+
+filtered_df = df[df["군구별"].isin(selected_regions)].copy()
+
+if filtered_df.empty:
+    st.warning("최소 1개 이상의 군·구를 선택해 주세요.")
+    st.stop()
+
+# 4. 상단 핵심 요약 지표 (KPI)
+total_gen = filtered_df["총 발생량(톤_년)"].sum()
+total_rec = filtered_df["총 재활용량(톤_년)"].sum()
+avg_rate = (total_rec / total_gen * 100) if total_gen > 0 else 0
+
+col1, col2, col3 = st.columns(3)
+col1.metric("선택 지역 총 발생량", f"{total_gen:,.1f} 톤/년")
+col2.metric("선택 지역 총 재활용량", f"{total_rec:,.1f} 톤/년")
+col3.metric("평균 재활용률", f"{avg_rate:.2f} %")
 
 st.divider()
 
-# --- 메인 그래프 영역 (2단 구성) ---
-left_col, right_col = st.columns(2)
+# 5. 인터랙티브 Plotly 시각화
+tab1, tab2, tab3 = st.tabs(["📊 발생량 vs 재활용량", "📈 유형별 재활용률 비교", "📋 원본 및 요약 데이터"])
 
-with left_col:
-    st.subheader(f"📊 {x_axis} vs {y_axis} 산점도")
-    fig_scatter = px.scatter(
-        filtered_df,
-        x=x_axis,
-        y=y_axis,
-        color="품종",
-        size="꽃잎길이",
-        hover_data=numeric_cols,
+with tab1:
+    st.subheader(f"군·구별 {waste_type} 발생량 및 재활용량 비교")
+
+    if waste_type == "전체 합계":
+        gen_col, rec_col = "총 발생량(톤_년)", "총 재활용량(톤_년)"
+    else:
+        gen_col, rec_col = categories[waste_type]
+
+    plot_df = filtered_df.sort_values(by=gen_col, ascending=False)
+
+    fig1 = go.Figure()
+    fig1.add_trace(
+        go.Bar(
+            x=plot_df["군구별"],
+            y=plot_df[gen_col],
+            name="발생량 (톤/년)",
+            marker_color="#636EFA",
+            hovertemplate="<b>%{x}</b><br>발생량: %{y:,.1f} 톤<extra></extra>",
+        )
+    )
+    fig1.add_trace(
+        go.Bar(
+            x=plot_df["군구별"],
+            y=plot_df[rec_col],
+            name="재활용량 (톤/년)",
+            marker_color="#00CC96",
+            hovertemplate="<b>%{x}</b><br>재활용량: %{y:,.1f} 톤<extra></extra>",
+        )
+    )
+
+    fig1.update_layout(
+        barmode="group",
+        xaxis_title="군·구",
+        yaxis_title="물량 (톤/년)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        hovermode="x unified",
         template="plotly_white",
+        height=480,
+    )
+    st.plotly_chart(fig1, use_container_width=True)
+
+with tab2:
+    st.subheader("폐기물 유형별 재활용률(%) 비교")
+
+    rate_cols = [f"{name} 재활용률(%)" for name in categories.keys()]
+    melted_df = filtered_df.melt(
+        id_vars=["군구별"],
+        value_vars=rate_cols,
+        var_name="폐기물 유형",
+        value_name="재활용률(%)",
+    )
+    melted_df["폐기물 유형"] = melted_df["폐기물 유형"].str.replace(" 재활용률(%)", "", regex=False)
+
+    fig2 = px.bar(
+        melted_df,
+        x="군구별",
+        y="재활용률(%)",
+        color="폐기물 유형",
+        barmode="group",
+        text_auto=".1f",
         color_discrete_sequence=px.colors.qualitative.Set2,
     )
-    fig_scatter.update_layout(
-        legend_title_text="품종", margin=dict(l=20, r=20, t=30, b=20)
-    )
-    st.plotly_chart(fig_scatter, use_container_width=True)
-
-with right_col:
-    st.subheader(f"📦 품종별 {y_axis} 분포 (Box & Strip)")
-    fig_box = px.box(
-        filtered_df,
-        x="품종",
-        y=y_axis,
-        color="품종",
-        points="all",  # 개별 데이터 포인트 함께 표시
+    fig2.update_traces(textposition="outside", hovertemplate="<b>%{x}</b><br>%{fullData.name}: %{y:.2f}%<extra></extra>")
+    fig2.update_layout(
+        yaxis=dict(range=[0, 115], title="재활용률 (%)"),
+        xaxis_title="군·구",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         template="plotly_white",
-        color_discrete_sequence=px.colors.qualitative.Set2,
+        height=500,
     )
-    fig_box.update_layout(showlegend=False, margin=dict(l=20, r=20, t=30, b=20))
-    st.plotly_chart(fig_box, use_container_width=True)
+    st.plotly_chart(fig2, use_container_width=True)
 
-# --- 하단 3D 산점도 및 원본 데이터 ---
-st.subheader("🧊 3D 다변량 분포 탐색")
-fig_3d = px.scatter_3d(
-    filtered_df,
-    x="꽃받침 길이",
-    y="꽃받침 너비",
-    z="꽃잎길이",
-    color="품종",
-    size="꽃잎 너비",
-    opacity=0.8,
-    template="plotly_white",
-    color_discrete_sequence=px.colors.qualitative.Set2,
-)
-fig_3d.update_layout(height=550, margin=dict(l=0, r=0, t=20, b=0))
-st.plotly_chart(fig_3d, use_container_width=True)
+with tab3:
+    st.subheader("군·구별 상세 데이터 및 계산된 재활용률")
+    st.dataframe(
+        filtered_df.style.format(
+            {col: "{:,.1f}" for col in filtered_df.select_dtypes(include="float").columns}
+        ),
+        use_container_width=True,
+    )
 
-with st.expander("📋 필터링된 원본 데이터 보기"):
-    st.dataframe(filtered_df, use_container_width=True)
